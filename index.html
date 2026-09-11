@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg" />
+    <title>矮人国度 DwarfRealm</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #10131a;
+        height: 100%;
+        overflow: hidden;
+      }
+      #app {
+        width: 100%;
+        height: 100%;
+      }
+      #loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #cfd6e4;
+        font-family: 'Microsoft YaHei', sans-serif;
+        font-size: 18px;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="loading">正在挖掘世界……</div>
+    <script type="module" src="/src/main.ts"></script>
+    <script>
+      window.addEventListener('load', () => {
+        // Phaser 就绪后隐藏 loading
+        setTimeout(() => {
+          const el = document.getElementById('loading');
+          if (el) el.style.display = 'none';
+        }, 1200);
+      });
+    </script>
+  </body>
+</html>

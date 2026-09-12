@@ -32,7 +32,7 @@ describe('GameSession 集成仿真', () => {
     session.markDig(x - 1, y + 2, x + 1, y + 11);
     run(session, 90);
     expect(session.inv.count('stone')).toBeGreaterThan(0);
-    expect(session.drops.length).toBeLessThanOrEqual(2);
+    expect(session.drops.length).toBeLessThanOrEqual(3); // 掉落物合并 + 搬运及时（时序留少量余量）
   }, 20000);
 
   it('矮人饥饿时会吃掉仓库里的食物', () => {

@@ -36,6 +36,10 @@ export interface TaskClaim {
 export class TaskManager {
   tasks: Task[] = [];
   private nextId = 1;
+  /** 认领轮转游标：避免每次都只尝试最近的任务导致远端任务被饿死 */
+  private claimCursor = 0;
+  /** 单次认领最多尝试的寻路次数（防止大面积框选时一帧内执行上百次 A*） */
+  private static CLAIM_MAX_TRY = 10;
 
   update(dt: number): void {
     for (const t of this.tasks) {
@@ -47,7 +51,7 @@ export class TaskManager {
     return this.tasks.some((t) => t.type === type && t.x === x && t.y === y);
   }
 
-  /** 框选标记挖掘区域 */
+  /** 框选标记挖掘区域。深层方块自动向上生成「竖井」任务，保证矮人总能挖到（类《打造世界》体验） */
   markDig(world: World, x0: number, y0: number, x1: number, y1: number): number {
     let n = 0;
     const [ax, bx] = x0 <= x1 ? [x0, x1] : [x1, x0];
@@ -59,6 +63,14 @@ export class TaskManager {
         if (this.hasTaskAt('dig', x, y)) continue;
         this.tasks.push({ id: this.nextId++, type: 'dig', x, y, claimedBy: null, progress: 0, cooldown: 0 });
         n++;
+        // 上方是实心且未标记时，逐格向上补竖井任务（直到空气/不可挖层）
+        for (let yy = y - 1; yy >= 1; yy--) {
+          const up = world.terrainAt(x, yy);
+          if (up === T.AIR || TERRAIN[up].hardness === Infinity) break;
+          if (this.hasTaskAt('dig', x, yy)) break;
+          this.tasks.push({ id: this.nextId++, type: 'dig', x, y: yy, claimedBy: null, progress: 0, cooldown: 0 });
+          n++;
+        }
       }
     }
     return n;
@@ -161,28 +173,32 @@ export class TaskManager {
     return before - this.tasks.length;
   }
 
-  /** 矮人认领最近的可达任务 */
+  /** 矮人认领任务：按距离排序 + 限次寻路 + 轮转起点，兼顾性能与公平 */
   claimFor(dwarfId: number, pos: Pt, world: World): TaskClaim | null {
+    const cands = this.tasks.filter((t) => t.claimedBy === null && t.cooldown <= 0);
+    if (cands.length === 0) return null;
+    cands.sort((a, b) => Math.abs(a.x - pos.x) + Math.abs(a.y - pos.y) - (Math.abs(b.x - pos.x) + Math.abs(b.y - pos.y)));
+    const n = cands.length;
+    const maxTry = Math.min(TaskManager.CLAIM_MAX_TRY, n);
     let best: TaskClaim | null = null;
-    for (const t of this.tasks) {
-      if (t.claimedBy !== null || t.cooldown > 0) continue;
+    for (let k = 0; k < maxTry; k++) {
+      const t = cands[(k + this.claimCursor) % n];
       let path: Pt[] | null;
       if (t.type === 'craft' && t.stationX === -1) {
         path = []; // 徒手合成，就地工作
       } else {
         const target: Pt = { x: t.x, y: t.y };
         path = pathToAdjacent(world, pos, target);
-        // 合成也允许直接站到工作台上
-        if (!path && t.type === 'craft') path = pathToAdjacent(world, pos, target, {});
       }
       if (!path) {
-        if (t.cooldown <= 0) t.cooldown = 2.5;
+        t.cooldown = 2.5;
         continue;
       }
       if (!best || path.length < best.path.length) {
         best = { task: t, path };
       }
     }
+    this.claimCursor = (this.claimCursor + maxTry) % n;
     if (best) best.task.claimedBy = dwarfId;
     return best;
   }

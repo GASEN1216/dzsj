@@ -31,7 +31,7 @@ export class SaveManager {
       const raw = this.storage.getItem(SAVE_KEY);
       if (!raw) return null;
       const data = JSON.parse(raw) as SaveData;
-      if (data.v !== 1) return null;
+      if (data.v !== 1 && data.v !== 2) return null;
       return GameSession.fromSave(data);
     } catch {
       return null;

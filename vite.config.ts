@@ -9,6 +9,12 @@ export default defineConfig({
   build: {
     target: 'es2020',
     chunkSizeWarningLimit: 2000,
+    rollupOptions: {
+      output: {
+        // 引擎单独分包：游戏逻辑迭代时 phaser chunk 走浏览器缓存
+        manualChunks: { phaser: ['phaser'] },
+      },
+    },
   },
   test: {
     environment: 'node',

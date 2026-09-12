@@ -180,4 +180,10 @@ export class Monster implements Combatant {
   serialize(): { kind: MonsterKind; x: number; y: number; hp: number } {
     return { kind: this.kind, x: this.x, y: this.y, hp: this.hp };
   }
+
+  static deserialize(d: ReturnType<Monster['serialize']>): Monster {
+    const m = new Monster(d.kind, d.x, d.y);
+    m.hp = d.hp;
+    return m;
+  }
 }

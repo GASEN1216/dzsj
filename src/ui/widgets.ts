@@ -72,8 +72,12 @@ export function makePanel(
   const closeBtn = makeButton(scene, w / 2 - 30, -h / 2 + 22, '✕', () => close(), { width: 36, height: 30 });
   const content = scene.add.container(0, 0);
   root.add([bg, titleText, closeBtn, content]);
+  let closed = false;
   const close = (): void => {
-    root.destroy();
+    if (closed) return;
+    closed = true;
+    // 延迟到下一次场景更新再销毁：避免事件回调中销毁与当帧渲染竞争导致 drawImage null 崩溃
+    scene.time.delayedCall(0, () => root.destroy());
   };
   return { root, content, close };
 }

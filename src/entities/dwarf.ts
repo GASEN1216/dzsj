@@ -394,7 +394,8 @@ export class Dwarf {
       this.state = DwarfState.IDLE;
       return;
     }
-    const distOk = t.type === 'craft' && t.stationX === -1 ? true : Math.abs(this.x - (t.x + 0.5)) < 2.5 && Math.abs(this.y - (t.y + 0.5)) < 2.5;
+    // 2.5 格内即可开工（含埋藏块上方 2 格站位：矮人 y=31.0 到目标中心 33.5 恰为 2.5）
+    const distOk = t.type === 'craft' && t.stationX === -1 ? true : Math.abs(this.x - (t.x + 0.5)) <= 2.5 && Math.abs(this.y - (t.y + 0.5)) <= 2.5;
     if (!distOk) {
       // 被挤开了，重新走过去
       this.state = DwarfState.GO_TASK;
@@ -538,25 +539,26 @@ export class Dwarf {
   }
 
   private findHaulJob(ctx: Ctx): boolean {
-    let best: { drop: Drop; path: Pt[] } | null = null;
+    // 候选按距离排序后限次寻路，避免掉落物很多时一帧内执行大量 A* 搜索
+    const cands: { drop: Drop; dist: number }[] = [];
     for (const drop of ctx.drops) {
       if (drop.n <= 0 || drop.claimedBy !== null) continue;
       if (drop.ignoreUntil > ctx.time.elapsed) continue;
       if (!this.canCarry(ctx, drop.res)) continue;
-      const dt = Math.hypot(drop.x - this.x, drop.y - this.y);
-      if (dt > 45) continue;
-      if (best && dt > Math.hypot(best.drop.x - this.x, best.drop.y - this.y)) continue;
+      const dist = Math.hypot(drop.x - this.x, drop.y - this.y);
+      if (dist > 45) continue;
+      cands.push({ drop, dist });
+    }
+    cands.sort((a, b) => a.dist - b.dist);
+    for (const { drop } of cands.slice(0, 8)) {
       const p = pathToTile(ctx.world, this.tile(), { x: Math.floor(drop.x), y: Math.floor(drop.y) });
       if (!p) {
         drop.ignoreUntil = ctx.time.elapsed + 8;
         continue;
       }
-      best = { drop, path: p };
-    }
-    if (best) {
-      best.drop.claimedBy = this.id;
-      this.haulDrop = best.drop;
-      this.path = best.path;
+      drop.claimedBy = this.id;
+      this.haulDrop = drop;
+      this.path = p;
       this.pathIdx = 0;
       this.state = DwarfState.TO_DROP;
       return true;

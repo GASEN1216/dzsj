@@ -22,11 +22,13 @@ export class UIScene extends Phaser.Scene {
   private phaseText!: Phaser.GameObjects.Text;
   private monsterText!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
-  private toolButtons = new Map<ToolMode | 'spell', Phaser.GameObjects.Container>();
+  private toolButtons = new Map<string, Phaser.GameObjects.Container>();
   private spellCd = new Map<'speed' | 'light' | 'heal', Phaser.GameObjects.Text>();
   private panel: PanelHandle | null = null;
   private panelKind: 'build' | 'craft' | 'tech' | 'dwarves' | 'settings' | null = null;
   private speedButtons = new Map<number, Phaser.GameObjects.Container>();
+  /** 设置面板内的速度按钮：关面板时从 speedButtons 移除，避免持有已销毁对象 */
+  private panelSpeedButtons: Phaser.GameObjects.Container[] = [];
   private toasts: Phaser.GameObjects.Text[] = [];
   private frame = 0;
   private overShown = false;
@@ -45,6 +47,12 @@ export class UIScene extends Phaser.Scene {
     this.gameScene = this.scene.get('Game') as GameScene;
     sfx.setVolume(session.settings.volume);
     this.overShown = session.gameOver;
+    // 重置瞬态状态（场景可能被反复启动）
+    this.panel = null;
+    this.panelKind = null;
+    this.panelSpeedButtons = [];
+    this.toasts = [];
+    this.frame = 0;
 
     this.buildTopBar();
     this.buildToolBar();
@@ -95,6 +103,9 @@ export class UIScene extends Phaser.Scene {
     for (const [sp, btn] of this.speedButtons) {
       setButtonActive(btn, this.session.settings.speed === sp);
     }
+    for (const btn of this.panelSpeedButtons) {
+      setButtonActive(btn, this.session.settings.speed === (btn as unknown as { speedVal: number }).speedVal);
+    }
   }
 
   // ---------- 左侧工具栏 ----------
@@ -144,17 +155,16 @@ export class UIScene extends Phaser.Scene {
       c.add(cd);
       this.spellCd.set(sp.id, cd);
       c.setDepth(6);
-      this.toolButtons.set('spell', c);
+      // 每个法术独立键名，避免三个按钮互相覆盖
+      this.toolButtons.set(`spell:${sp.id}`, c);
       (c as unknown as { hint: string }).hint = `${SPELLS.find((s) => s.id === sp.id)!.name}：${SPELLS.find((s) => s.id === sp.id)!.desc}（左键点击施放）`;
-      // 覆盖 hint 记录
-      (c as unknown as { spellHint: string }).spellHint = (c as unknown as { hint: string }).hint;
     });
 
     // 工具 hover 提示
     for (const [, btn] of this.toolButtons) {
       const rect = (btn as unknown as { btnRect: Phaser.GameObjects.Rectangle }).btnRect;
       rect.on('pointerover', () => {
-        const h = (btn as unknown as { hint?: string; spellHint?: string }).spellHint ?? (btn as unknown as { hint?: string }).hint;
+        const h = (btn as unknown as { hint?: string }).hint;
         if (h) this.hint.setText(h);
       });
       rect.on('pointerout', () => this.hint.setText(''));
@@ -163,8 +173,9 @@ export class UIScene extends Phaser.Scene {
 
   private refreshTools(): void {
     for (const [mode, btn] of this.toolButtons) {
-      if (mode === 'spell') {
-        setButtonActive(btn, this.gameScene.tool === 'spell');
+      if (mode.startsWith('spell:')) {
+        const spellId = mode.slice(6) as 'speed' | 'light' | 'heal';
+        setButtonActive(btn, this.gameScene.tool === 'spell' && this.gameScene.spellSel === spellId);
       } else {
         setButtonActive(btn, this.gameScene.tool === mode);
       }
@@ -195,14 +206,19 @@ export class UIScene extends Phaser.Scene {
   // ---------- 面板 ----------
 
   private togglePanel(kind: 'build' | 'craft' | 'tech' | 'dwarves' | 'settings'): void {
-    if (this.panel && this.panelKind === kind) {
-      this.panel.close();
-      this.panel = null;
+    const closeCurrent = (): void => {
+      if (this.panel) {
+        this.panel.close();
+        this.panel = null;
+      }
+      this.panelSpeedButtons = [];
       this.panelKind = null;
+    };
+    if (this.panel && this.panelKind === kind) {
+      closeCurrent();
       return;
     }
-    if (this.panel) this.panel.close();
-    this.panel = null;
+    closeCurrent();
     this.panelKind = kind;
     switch (kind) {
       case 'build':
@@ -264,7 +280,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   private openCraft(): void {
-    const p = makePanel(this, GAME_W / 2, GAME_H / 2 - 10, 620, 480, '🔨 合成');
+    const p = makePanel(this, GAME_W / 2, GAME_H / 2 - 10, 620, 512, '🔨 合成');
     this.panel = p;
     const redraws: (() => void)[] = [];
     RECIPES.forEach((r, i) => {
@@ -298,7 +314,7 @@ export class UIScene extends Phaser.Scene {
       redraws[redraws.length - 1]();
     });
     p.content.add(
-      this.add.text(0, 214, '合成任务会进入队列，最近的空闲矮人会前往工作站制作', { fontFamily: UI_FONT, fontSize: '12px', color: '#8a93a8' }).setOrigin(0.5)
+      this.add.text(0, 232, '合成任务会进入队列，最近的空闲矮人会前往工作站制作', { fontFamily: UI_FONT, fontSize: '12px', color: '#8a93a8' }).setOrigin(0.5)
     );
     (p as unknown as { refresh?: () => void }).refresh = () => redraws.forEach((rr) => rr());
   }
@@ -384,8 +400,10 @@ export class UIScene extends Phaser.Scene {
     const track = this.add.rectangle(-60, -140, 200, 8, 0x3a4356).setOrigin(0, 0.5);
     const handle = this.add.rectangle(-60 + 200 * this.session.settings.volume, -140, 14, 22, 0x9db8ff).setOrigin(0.5);
     handle.setInteractive({ draggable: true, useHandCursor: true });
-    handle.on('drag', (_p: unknown, dx: number) => {
-      const nx = Phaser.Math.Clamp(dx, -60, 140);
+    handle.on('drag', (_p: unknown, dragX: number) => {
+      // dragX 是场景全局坐标，需换算为面板容器内的局部坐标
+      const localX = dragX - GAME_W / 2;
+      const nx = Phaser.Math.Clamp(localX, -60, 140);
       handle.x = nx;
       const v = (nx + 60) / 200;
       this.session.settings.volume = v;
@@ -393,19 +411,20 @@ export class UIScene extends Phaser.Scene {
     });
     p.content.add([track, handle]);
 
-    p.content.add(this.add.text(-180, -90, '游戏速度', { fontFamily: UI_FONT, fontSize: '16px', color: '#ffffff' }));
+    p.content.add(this.add.text(-180, -98, '游戏速度', { fontFamily: UI_FONT, fontSize: '16px', color: '#ffffff' }));
     const speeds: { sp: 0 | 1 | 2; label: string }[] = [
       { sp: 0, label: '暂停' },
       { sp: 1, label: '1x' },
       { sp: 2, label: '2x' },
     ];
     speeds.forEach((s, i) => {
-      const b = makeButton(this, -120 + i * 100, -60, s.label, () => {
+      const b = makeButton(this, -120 + i * 100, -52, s.label, () => {
         this.session.settings.speed = s.sp;
         this.refreshSpeed();
       }, { width: 80, height: 34 });
+      (b as unknown as { speedVal: number }).speedVal = s.sp;
       p.content.add(b);
-      this.speedButtons.set(s.sp, b);
+      this.panelSpeedButtons.push(b);
     });
 
     const saveBtn = makeButton(this, 0, 20, '💾 保存游戏', () => {
@@ -489,16 +508,23 @@ export class UIScene extends Phaser.Scene {
     this.frame++;
     if (this.frame % 12 !== 0) return;
 
+    // 脏检查：内容不变时不调用 setText（Phaser 会因 setText 重建文本纹理）
+    const set = (t: Phaser.GameObjects.Text | undefined, s: string): void => {
+      if (t && t.text !== s) t.setText(s);
+    };
     for (const r of RES_ORDER) {
-      this.resTexts.get(r)?.setText(`${this.session.inv.count(r)}`);
+      set(this.resTexts.get(r), `${this.session.inv.count(r)}`);
     }
     const cap = `${this.session.inv.used()}/${this.session.inv.capacity}`;
-    this.phaseText.setText(`第 ${this.session.time.day} 天 · ${this.session.time.phaseName()} ${this.session.time.isNight ? '🌙' : '☀'} · 仓库 ${cap}`);
-    this.monsterText.setText(this.session.monsters.length > 0 ? `👹 ×${this.session.monsters.length}` : '');
+    set(
+      this.phaseText,
+      `第 ${this.session.time.day} 天 · ${this.session.time.phaseName()} ${this.session.time.isNight ? '🌙' : '☀'} · 仓库 ${cap}`
+    );
+    set(this.monsterText, this.session.monsters.length > 0 ? `👹 ×${this.session.monsters.length}` : '');
 
     for (const [id, cd] of this.spellCd) {
       const v = this.session.spells.cds[id];
-      cd.setText(v > 0 ? `${Math.ceil(v)}s` : '');
+      set(cd, v > 0 ? `${Math.ceil(v)}s` : '');
     }
 
     if (this.panel && (this.panelKind === 'dwarves' || this.panelKind === 'craft' || this.panelKind === 'tech')) {

@@ -59,6 +59,22 @@ describe('A* 寻路', () => {
     expect(path).toBeNull();
   });
 
+  it('矮人可以走下 ≤6 格的落差（悬崖）', () => {
+    const wd = flatWorld(20, 16, 8);
+    // 悬崖：x=6 列的 y8、y9 挖空，矮人从高台 (5,7) 跳下落到 (6,10)，再走到低台
+    for (let x = 7; x < 20; x++) {
+      for (let y = 8; y <= 9; y++) wd.terrain[wd.idx(x, y)] = T.AIR;
+      for (let y = 10; y < 16; y++) wd.terrain[wd.idx(x, y)] = T.STONE;
+      wd.surface[x] = 10;
+    }
+    wd.terrain[wd.idx(6, 8)] = T.AIR;
+    wd.terrain[wd.idx(6, 9)] = T.AIR;
+    const path = pathToTile(wd, { x: 3, y: 7 }, { x: 10, y: 9 });
+    expect(path).not.toBeNull();
+    // 路径必须包含下落落点 (6,9)
+    expect(path!.some((p) => p.x === 6 && p.y === 9)).toBe(true);
+  });
+
   it('pathToAdjacent 返回目标旁的站位', () => {
     const wd = flatWorld();
     wd.terrain[wd.idx(8, 7)] = T.STONE; // 要挖的目标（嵌在地里）

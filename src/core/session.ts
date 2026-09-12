@@ -20,7 +20,7 @@ export interface SessionSettings {
 }
 
 export interface SaveData {
-  v: 1;
+  v: 1 | 2;
   seed: number;
   time: ReturnType<GameTime['serialize']>;
   world: ReturnType<World['serialize']>;
@@ -28,9 +28,13 @@ export interface SaveData {
   techs: string[];
   tasks: ReturnType<TaskManager['serialize']>;
   dwarves: ReturnType<Dwarf['serialize']>[];
+  /** v2 起保存怪物（v1 旧档无此字段，读档后怪物由刷怪系统自然补充） */
+  monsters?: ReturnType<Monster['serialize']>[];
   drops: Drop[];
   base: Pt;
   spells: ReturnType<SpellSystem['serialize']>;
+  /** v2 起保存玩家设置（音量/速度），读档不再重置 */
+  settings?: SessionSettings;
 }
 
 export class GameSession {
@@ -140,12 +144,43 @@ export class GameSession {
       if (nav.canStand(tx, ty)) continue;
       d.vy += 26 * dt;
       let ny = d.y + d.vy * dt;
-      const nty = Math.floor(ny);
-      if (nav.canStand(tx, nty)) {
-        ny = nty + 0.55;
-        d.vy = 0;
+      let landed = false;
+      // 逐行扫描落点：高速下落时防止单帧越过薄地板（隧道效应）
+      const y0 = Math.floor(d.y);
+      const y1 = Math.floor(ny);
+      for (let r = y0 + 1; r <= y1; r++) {
+        if (!this.world.inBounds(tx, r)) {
+          ny = r - 1 + 0.55;
+          d.vy = 0;
+          landed = true;
+          break;
+        }
+        if (nav.canStand(tx, r)) {
+          ny = r + 0.55;
+          d.vy = 0;
+          landed = true;
+          break;
+        }
+        if (this.world.isSolidTerrain(tx, r)) {
+          ny = r - 1 + 0.55;
+          d.vy = 0;
+          landed = true;
+          break;
+        }
       }
       d.y = Math.min(ny, this.world.h - 1.5);
+      // 落地后与同格同类未认领掉落物合并，控制大量挖掘时的实体数量
+      if (landed && d.n > 0) {
+        for (const o of this.drops) {
+          if (o === d || o.n <= 0 || o.res !== d.res || o.claimedBy !== null) continue;
+          if (Math.abs(o.x - d.x) < 0.6 && Math.abs(o.y - d.y) < 0.6) {
+            o.n += d.n;
+            o.ignoreUntil = 0;
+            d.n = 0;
+            break;
+          }
+        }
+      }
     }
     this.drops = this.drops.filter((d) => d.n > 0 && d.y < this.world.h - 1);
   }
@@ -198,7 +233,17 @@ export class GameSession {
 
   spawnDrop(res: Res, n: number, x: number, y: number): void {
     if (n <= 0) return;
-    this.drops.push({ id: this.nextDropId++, res, n, x: x + 0.5, y: y + 0.5, vy: 0, claimedBy: null, ignoreUntil: 0 });
+    const wx = x + 0.5;
+    const wy = y + 0.5;
+    // 同格同类未认领掉落物合并，避免大量挖掘时实体堆积
+    for (const d of this.drops) {
+      if (d.res === res && d.claimedBy === null && Math.abs(d.x - wx) < 0.6 && Math.abs(d.y - wy) < 0.6) {
+        d.n += n;
+        d.ignoreUntil = 0;
+        return;
+      }
+    }
+    this.drops.push({ id: this.nextDropId++, res, n, x: wx, y: wy, vy: 0, claimedBy: null, ignoreUntil: 0 });
   }
 
   // ---------- 玩家操作接口 ----------
@@ -275,7 +320,7 @@ export class GameSession {
 
   serialize(): SaveData {
     return {
-      v: 1,
+      v: 2,
       seed: this.seed,
       time: this.time.serialize(),
       world: this.world.serialize(),
@@ -283,9 +328,11 @@ export class GameSession {
       techs: this.techs.serialize(),
       tasks: this.tasks.serialize(),
       dwarves: this.dwarves.filter((d) => !d.dead).map((d) => d.serialize()),
+      monsters: this.monsters.filter((m) => !m.dead).map((m) => m.serialize()),
       drops: this.drops.map((d) => ({ ...d })),
       base: this.base,
       spells: this.spells.serialize(),
+      settings: { ...this.settings },
     };
   }
 
@@ -298,7 +345,14 @@ export class GameSession {
     s.tasks = TaskManager.deserialize(data.tasks);
     s.spells = SpellSystem.deserialize(data.spells);
     s.dwarves = data.dwarves.map((d) => Dwarf.deserialize(d));
+    s.monsters = (data.monsters ?? []).map((m) => Monster.deserialize(m));
     s.drops = data.drops.map((d) => ({ ...d }));
+    if (data.settings) {
+      const sp = Math.max(0, Math.min(2, data.settings.speed | 0));
+      s.settings = { volume: data.settings.volume, speed: (sp === 0 || sp === 1 || sp === 2 ? sp : 1) as 0 | 1 | 2 };
+    }
+    // 掉落物 id 计数器恢复到存档最大值之后，避免新生成掉落物与旧掉落物 id 冲突
+    s.nextDropId = s.drops.reduce((mx, d) => Math.max(mx, d.id), 0) + 1;
     s.prevNight = s.time.isNight;
     return s;
   }

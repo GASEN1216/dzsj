@@ -77,12 +77,16 @@ describe('TaskManager 任务系统', () => {
     expect(claim2!.task.x).toBe(8);
   });
 
-  it('寻路失败的任务进入冷却不被反复认领', () => {
+  it('完全封闭的挖掘任务不可达，进入冷却不被反复认领', () => {
     const wd = dirtWorld();
-    for (let x = 0; x < 10; x++) wd.terrain[wd.idx(x, 5)] = T.STONE; // 全部封死
+    // 大体积实心石块（x0..9 × y3..7），目标埋在中心：曼哈顿 ≤2 内无可站立格，任何规则下都不可达
+    for (let x = 0; x < 10; x++) {
+      for (let y = 3; y <= 7; y++) wd.terrain[wd.idx(x, y)] = T.STONE;
+    }
     const tm = new TaskManager();
-    tm.markDig(wd, 1, 5, 1, 5);
-    const claim = tm.claimFor(1, { x: 1, y: 2 }, wd);
+    // 直接注入（绕过 markDig 的竖井自动接入——竖井正是这类封闭块的官方解法）
+    tm.tasks.push({ id: 1, type: 'dig', x: 4, y: 5, claimedBy: null, progress: 0, cooldown: 0 });
+    const claim = tm.claimFor(1, { x: 4, y: 2 }, wd);
     expect(claim).toBeNull();
     expect(tm.tasks[0].cooldown).toBeGreaterThan(0);
   });

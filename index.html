@@ -3,6 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="矮人国度 DwarfRealm —— 类《打造世界》的 2D 沙盒建造策略网页游戏：程序化像素世界，带领矮人挖掘、建造、合成、抵御夜晚的怪物进攻。" />
+    <meta name="theme-color" content="#10131a" />
+    <meta property="og:title" content="矮人国度 DwarfRealm" />
+    <meta property="og:description" content="类《打造世界》2D 沙盒建造策略网页游戏，纯单机、纯前端。" />
+    <meta property="og:type" content="website" />
     <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg" />
     <title>矮人国度 DwarfRealm</title>
     <style>
@@ -28,21 +33,30 @@
         font-family: 'Microsoft YaHei', sans-serif;
         font-size: 18px;
         pointer-events: none;
+        z-index: 10;
+      }
+      #fatal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 12px;
+        background: #10131af2;
+        color: #ff8a8a;
+        font-family: 'Microsoft YaHei', sans-serif;
+        font-size: 16px;
+        z-index: 100;
+        text-align: center;
+        padding: 24px;
       }
     </style>
   </head>
   <body>
     <div id="app"></div>
     <div id="loading">正在挖掘世界……</div>
+    <div id="fatal"></div>
     <script type="module" src="/src/main.ts"></script>
-    <script>
-      window.addEventListener('load', () => {
-        // Phaser 就绪后隐藏 loading
-        setTimeout(() => {
-          const el = document.getElementById('loading');
-          if (el) el.style.display = 'none';
-        }, 1200);
-      });
-    </script>
   </body>
 </html>

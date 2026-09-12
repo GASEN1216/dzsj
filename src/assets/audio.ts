@@ -25,6 +25,8 @@ class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private volume = 0.7;
+  /** 共享白噪声缓冲（惰性创建，避免每次播放都分配） */
+  private noiseBuf: AudioBuffer | null = null;
 
   /** 必须在用户手势中调用 */
   unlock(): void {
@@ -63,15 +65,26 @@ class Sfx {
     osc.stop(t0 + dur + 0.02);
   }
 
+  private getNoiseBuffer(): AudioBuffer | null {
+    if (!this.ctx) return null;
+    if (!this.noiseBuf) {
+      const len = this.ctx.sampleRate;
+      this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const data = this.noiseBuf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    }
+    return this.noiseBuf;
+  }
+
   private noise(dur: number, vol: number, filterFreq: number, delay = 0): void {
     if (!this.ctx || !this.master) return;
+    const buf = this.getNoiseBuffer();
+    if (!buf) return;
     const t0 = this.ctx.currentTime + delay;
-    const len = Math.max(1, Math.floor(this.ctx.sampleRate * dur));
-    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
+    // 随机取一个片段起点，避免每次播放听起来完全一致
+    const offset = Math.random() * Math.max(0, buf.duration - dur - 0.05);
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
     filter.frequency.value = filterFreq;
@@ -80,7 +93,8 @@ class Sfx {
     g.gain.setValueAtTime(vol, t0);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     src.connect(filter).connect(g).connect(this.master);
-    src.start(t0);
+    src.start(t0, offset);
+    src.stop(t0 + dur + 0.02);
   }
 
   play(name: SfxName): void {

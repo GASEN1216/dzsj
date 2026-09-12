@@ -4,7 +4,7 @@ import { RES, STRUCTURE, S, T, TERRAIN } from '../core/defs';
 import { GameSession } from '../core/session';
 import type { Monster } from '../entities/monster';
 import { SaveManager } from '../save/saveManager';
-import { TEX_PX, WORLD_SCALE, TILE_PX, AUTOSAVE_SEC } from '../config';
+import { TEX_PX, WORLD_SCALE, TILE_PX, AUTOSAVE_SEC, GAME_W, GAME_H } from '../config';
 import { canPlaceStructure } from '../world/worldGen';
 import { sfx } from '../assets/audio';
 import type { UIScene } from './UIScene';
@@ -76,9 +76,14 @@ export class GameScene extends Phaser.Scene {
     this.dropLayer = this.add.container(0, 0);
     this.entityLayer = this.add.container(0, 0);
     this.entityG = this.add.graphics();
-    this.lightRT = this.add.renderTexture(0, 0, tw, th).setOrigin(0);
+    // 光照 RT 只需覆盖最小缩放（0.5）时的视口，无需全图尺寸——每帧重绘成本降低约 3 倍
+    const lw = Math.ceil(GAME_W / WORLD_SCALE / 0.5) + 32;
+    const lh = Math.ceil(GAME_H / WORLD_SCALE / 0.5) + 32;
+    this.lightRT = this.add.renderTexture(0, 0, lw, lh).setOrigin(0);
     this.overlayG = this.add.graphics();
     this.lightG = this.add.graphics();
+    // lightG 仅作为 lightRT 的绘制笔刷，不参与场景渲染
+    this.lightG.removeFromDisplayList();
     this.worldC.add([this.terrainRT, this.structRT, this.markerG, this.dropLayer, this.entityLayer, this.entityG, this.lightRT, this.overlayG]);
 
     // 建造虚影
@@ -235,9 +240,16 @@ export class GameScene extends Phaser.Scene {
     const g = this.markerG;
     g.clear();
     const ts = TEX_PX;
+    // 只绘制视口内的任务标记
+    const view = this.cameras.main.worldView;
+    const vx = view.x / WORLD_SCALE;
+    const vy = view.y / WORLD_SCALE;
+    const vw = view.width / WORLD_SCALE;
+    const vh = view.height / WORLD_SCALE;
     for (const task of this.session.tasks.tasks) {
       const x = task.x * ts;
       const y = task.y * ts;
+      if (x < vx - ts || x > vx + vw || y < vy - ts || y > vy + vh) continue;
       if (task.type === 'dig') {
         g.fillStyle(0xffd94a, 0.22).fillRect(x, y, ts, ts);
         g.lineStyle(1, 0xffd94a, 0.9).strokeRect(x + 0.5, y + 0.5, ts - 1, ts - 1);
@@ -301,6 +313,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
     // 掉落物
+    const liveDropIds = new Set(drops.map((d2) => d2.id));
     for (const drop of drops) {
       let spr = this.dropSprites.get(drop.id);
       if (!spr) {
@@ -311,7 +324,7 @@ export class GameScene extends Phaser.Scene {
       spr.setPosition(drop.x * TEX_PX, drop.y * TEX_PX - Math.sin(time * 0.004 + drop.id) * 1);
     }
     for (const [id, spr] of this.dropSprites) {
-      if (!drops.find((d2) => d2.id === id)) {
+      if (!liveDropIds.has(id)) {
         spr.destroy();
         this.dropSprites.delete(id);
       }
@@ -326,31 +339,34 @@ export class GameScene extends Phaser.Scene {
     const vw = view.width / WORLD_SCALE;
     const vh = view.height / WORLD_SCALE;
     const rt = this.lightRT;
+    // RT 跟随视口左上角，内部以局部坐标绘制
+    rt.setPosition(Math.floor(vx), Math.floor(vy));
     rt.clear();
     const g = this.lightG;
     g.clear();
 
     const nightA = this.session.time.darkness();
     if (nightA > 0.01) {
-      g.fillStyle(0x060913, nightA).fillRect(vx, vy, vw, vh);
+      g.fillStyle(0x060913, nightA).fillRect(0, 0, vw, vh);
     }
-    // 地下黑暗（按列地表高度）
+    // 地下黑暗（按列地表高度，局部坐标）
     const x0 = Math.max(0, Math.floor(vx / TEX_PX) - 1);
     const x1 = Math.min(this.session.world.w - 1, Math.ceil((vx + vw) / TEX_PX) + 1);
     g.fillStyle(0x04060c, 0.6);
     for (let x = x0; x <= x1; x++) {
-      const top = this.session.world.surface[x] * TEX_PX;
-      if (top > vy + vh) continue;
-      g.fillRect(x * TEX_PX, Math.max(top, vy), TEX_PX, Math.min(top + vh + vy, vy + vh) - Math.max(top, vy));
+      const top = this.session.world.surface[x] * TEX_PX - vy;
+      if (top > vh) continue;
+      const y0 = Math.max(top, 0);
+      g.fillRect(x * TEX_PX - vx, y0, TEX_PX, vh - y0);
     }
     rt.draw(g);
 
-    // 光源挖洞
+    // 光源挖洞（局部坐标）
     const ctx = this.session.buildCtx();
     for (const l of ctx.lights) {
-      const lx = l.x * TEX_PX;
-      const ly = l.y * TEX_PX;
-      if (lx < vx - 160 || lx > vx + vw + 160 || ly < vy - 160 || ly > vy + vh + 160) continue;
+      const lx = l.x * TEX_PX - vx;
+      const ly = l.y * TEX_PX - vy;
+      if (lx < -160 || lx > vw + 160 || ly < -160 || ly > vh + 160) continue;
       const d = l.r * 2 * TEX_PX;
       const key = d <= 96 ? 'light96' : d <= 160 ? 'light160' : 'light288';
       const size = d <= 96 ? 96 : d <= 160 ? 160 : 288;
@@ -407,10 +423,12 @@ export class GameScene extends Phaser.Scene {
 
     if (speed > 0) {
       this.session.update(dt);
-      this.autosaveTimer += dt;
-      if (this.autosaveTimer >= AUTOSAVE_SEC) {
-        this.autosaveTimer = 0;
-        if (this.saveMgr.save(this.session)) this.ui?.showToast('已自动保存');
+      if (!this.session.gameOver) {
+        this.autosaveTimer += dt;
+        if (this.autosaveTimer >= AUTOSAVE_SEC) {
+          this.autosaveTimer = 0;
+          if (this.saveMgr.save(this.session)) this.ui?.showToast('已自动保存');
+        }
       }
     }
 
@@ -493,6 +511,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private puff(tx: number, ty: number, color: number): void {
+    // 粒子上限保护：大量挖掘/战斗时避免补间对象无限堆积
+    if (this.tweens.tweens.length > 90) return;
     const x = tx * TEX_PX;
     const y = ty * TEX_PX;
     for (let i = 0; i < 4; i++) {

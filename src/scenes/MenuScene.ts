@@ -103,6 +103,7 @@ export class MenuScene extends Phaser.Scene {
   private startContinue(): void {
     const session = this.saveMgr.load();
     if (!session) {
+      this.showMsg('存档读取失败，已开始新游戏');
       this.startNew();
       return;
     }
@@ -110,7 +111,19 @@ export class MenuScene extends Phaser.Scene {
     this.registry.set('saveMgr', this.saveMgr);
     this.scene.start('Game');
   }
-}
 
-// 防止未使用告警
-void GAME_H;
+  /** 菜单页内提示（UIScene 未运行，无法用 showToast） */
+  private showMsg(text: string): void {
+    const t = this.add
+      .text(GAME_W / 2, 330, text, {
+        fontFamily: UI_FONT,
+        fontSize: '16px',
+        color: '#ff8a8a',
+        backgroundColor: '#232a38dd',
+        padding: { x: 12, y: 6 },
+      })
+      .setOrigin(0.5)
+      .setDepth(2000);
+    this.tweens.add({ targets: t, alpha: 0, delay: 2200, duration: 600, onComplete: () => t.destroy() });
+  }
+}

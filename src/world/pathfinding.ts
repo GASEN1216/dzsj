@@ -133,7 +133,14 @@ export class NavGrid {
         else if (!this.forMonster && this.canStand(nx, ny)) out.push({ x: nx, y: ny, cost: 2.6 + this.enterCost(nx, ny) });
       } else if (dy === 1) {
         // 向下：落到可站立处或梯子
-        if (this.canStand(nx, ny) || this.ladderAt(nx, ny) || ladderHere) tryAdd(nx, ny, 1);
+        if (this.canStand(nx, ny) || this.ladderAt(nx, ny) || ladderHere) {
+          tryAdd(nx, ny, 1);
+        } else if (!this.forMonster && this.terrainPassable(nx, ny)) {
+          // 自由下落：矮人受重力，允许走下最多 6 格的落差，落到首个可站立格
+          let fy = ny;
+          while (fy < this.world.h - 1 && fy - ny < 6 && this.terrainPassable(nx, fy) && !this.canStand(nx, fy) && !this.ladderAt(nx, fy)) fy++;
+          if (this.terrainPassable(nx, fy) && this.canStand(nx, fy)) tryAdd(nx, fy, 1 + (fy - ny) * 0.3);
+        }
       } else {
         // 水平：目标必须可站立/梯子，避免坠崖
         if (this.canStand(nx, ny) || this.ladderAt(nx, ny) || ladderHere) tryAdd(nx, ny, 1);
@@ -199,13 +206,27 @@ export function findPath(
   return null;
 }
 
-/** 走到目标格旁（曼哈顿距离 1 的可站立格），用于挖掘/建造 */
+/** 走到目标格旁（曼哈顿距离 1 的可站立格），用于挖掘/建造。
+ *  矮人模式下若目标四邻全为实心地形（「埋藏」块，如山坡侧面深层矿），则允许站在
+ *  曼哈顿距离 2 的可站立格开工——否则这类任务永远无法寻路。
+ *  怪物模式保持原语义（怪物有贴身攻击与原地砸块逻辑，不能停在 2 格外）。 */
 export function pathToAdjacent(world: World, start: Pt, target: Pt, opts: PathOptions = {}): Pt[] | null {
+  const nav = new NavGrid(world, opts.forMonster ?? false);
+  const buried =
+    !nav.forMonster &&
+    world.isSolidTerrain(target.x - 1, target.y) &&
+    world.isSolidTerrain(target.x + 1, target.y) &&
+    world.isSolidTerrain(target.x, target.y - 1) &&
+    world.isSolidTerrain(target.x, target.y + 1);
   return findPath(
     world,
     start,
     (x, y) => Math.max(0, manhattan(x, y, target.x, target.y) - 1),
-    (x, y) => manhattan(x, y, target.x, target.y) === 1,
+    (x, y) => {
+      const m = manhattan(x, y, target.x, target.y);
+      if (m === 1) return true;
+      return buried && m === 2 && nav.canStand(x, y);
+    },
     opts
   );
 }

@@ -9,6 +9,8 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     genTextures(this);
+    // 游戏就绪，移除入口 loading 遮罩
+    document.getElementById('loading')?.remove();
     this.scene.start('Menu');
   }
 }

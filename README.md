@@ -2,6 +2,8 @@
 
 一款类《打造世界》（Craft the World）的 **2D 沙盒建造策略网页游戏**。纯单机、纯前端，无需服务器——程序化生成像素世界，带领一队矮人挖掘、建造、合成、抵御夜晚的怪物进攻。
 
+▶ **在线试玩：<https://gasen1216.github.io/dzsj/>**（GitHub Pages，自动部署自 main 分支）
+
 **技术栈**：TypeScript + Vite + Phaser 3 + Vitest，包管理 pnpm。
 **所有美术与音效均由代码程序化生成**（16×16 像素贴图 + WebAudio 合成），零外部素材依赖。
 
